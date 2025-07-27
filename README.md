@@ -9,7 +9,7 @@ You can toggle between these two by setting the flag `USE_EDGE_TTS = True` in th
 
 ## Manual Prerequisites
 
-This project relies on Python 3.8+ and either:
+This project relies on Python 3.8+ and the following things:
 
 - **Edge-TTS** (uses Microsoft Edge neural voices, requires `edge-tts` Python package and `ffmpeg` for audio playback), or  
 - **espeak-ng** (classic, lightweight, robotic TTS engine available locally on most platforms).
