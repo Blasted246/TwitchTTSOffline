@@ -13,7 +13,7 @@ This project relies on Python 3.8+ and either:
 
 - **Edge-TTS** (uses Microsoft Edge neural voices, requires `edge-tts` Python package and `ffmpeg` for audio playback), or  
 - **espeak-ng** (classic, lightweight, robotic TTS engine available locally on most platforms).
-
+- Go to [Twitch Token Generator](https://twitchtokengenerator.com/) to get your client secret and client ID.
 ---
 
 ### Installing Python
