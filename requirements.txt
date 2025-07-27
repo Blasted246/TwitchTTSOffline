@@ -1,0 +1,9 @@
+# Here lies all the things one must need to run my program - HAHAHAHAHA
+
+# Core dependencies - Yes, Espeak-ng isn't a CORE dependency but is still used by the program if you change the USE_EDGE_TTS flag to false in the script.
+twitchio>=3.1.0
+edge-tts>=6.1.14
+espeak-ng-python>=1.0.3
+
+# I mean, technically optional if you wanna add your own audio processor thingy but like, I would use this LOL
+ffmpeg-python>=5.0.0
