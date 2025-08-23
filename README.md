@@ -28,10 +28,10 @@ python --version
 
 ---
 
-### Installing Edge-TTS
+### Installing Edge-TTS (Might as well install everything else)
 
 ```bash
-pip install twitchio edge-tts
+pip install twitchio requests edge-tts pycaw comtypes
 ```
 
 * **REQUIRED:** Install FFMPEG to play audio output
