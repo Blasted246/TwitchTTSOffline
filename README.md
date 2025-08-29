@@ -1,5 +1,5 @@
 
-# Twitch Chat TTS Bot (Edge-TTS)
+# Twitch Chat TTS Bot
 
 Have a local TTS service read your Twitch Chat for you!  
 Reads all chat messages except your own and speaks them aloud using **Edge-TTS** (modern neural voices).
