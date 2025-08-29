@@ -10,6 +10,9 @@ TTS_VOLUME=1.0
 # Volume to reduce other apps to while TTS speaks (default: 0.5)
 TTS_ATTENUATION=0.5
 
+# Edge-TTS voice go to https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts for options
+TTS_VOICE=en-US-AvaMultilingualNeural
+
 # Comma-separated process names to exclude from attenuation (Windows)
 ATTENUATION_EXCLUDE_PROCESSES=
 

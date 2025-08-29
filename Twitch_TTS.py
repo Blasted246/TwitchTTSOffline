@@ -35,6 +35,7 @@ def read_config(path="config.txt"):
 _cfg = read_config()
 CHANNEL_NAME = _cfg.get("CHANNEL_NAME", "your_channel_here")
 CHANNEL_NAME_LOWER = CHANNEL_NAME.lower()
+TTS_VOICE = (_cfg.get("TTS_VOICE", "en-GB-RyanNeural") or "en-GB-RyanNeural").strip()
 
 try:
     TTS_VOLUME = float(_cfg.get("TTS_VOLUME", "1.0"))
@@ -241,8 +242,7 @@ async def generate_tts_file(text: str) -> str:
     if not text or not text.strip():
         raise ValueError("Empty text")
     romanized = _romanize_text(text)
-    voice = 'en-GB-RyanNeural'
-    communicate = edge_tts.Communicate(romanized, voice=voice)
+    communicate = edge_tts.Communicate(romanized, voice=TTS_VOICE)
     # Unique file per item so we can pipeline generation/playback
     temp_path = os.path.join(os.getcwd(), f"tts_{int(time.time()*1000)}_{random.randint(1000,9999)}.mp3")
     await communicate.save(temp_path)
