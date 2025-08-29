@@ -1,0 +1,20 @@
+# Set the Twitch channel to read (without the #)
+CHANNEL_NAME=your_channel_here
+
+# Seconds between messages from the same user before their name is spoken again
+# Set to 0 to always include the username
+NAME_REPEAT_COOLDOWN=15
+
+# TTS volume (default: 1.0)
+TTS_VOLUME=1.0
+# Volume to reduce other apps to while TTS speaks (default: 0.5)
+TTS_ATTENUATION=0.5
+
+# Comma-separated process names to exclude from attenuation (Windows)
+ATTENUATION_EXCLUDE_PROCESSES=
+
+# Optional delay (ms) before applying attenuation to let audio sessions appear
+ATTENUATION_DELAY_MS=100
+
+# Comma-separated list of usernames to ignore (case-insensitive); e.g. "nightbot, streamelements"
+IGNORE_USERS=
