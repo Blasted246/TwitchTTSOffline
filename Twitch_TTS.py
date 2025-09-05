@@ -105,6 +105,20 @@ def _filter_emotes_from_message(message_text: str, emotes_tag: str) -> str:
     
     return filtered_message
 
+def _apply_custom_pronunciations(text: str) -> str:
+    """Apply custom pronunciation replacements"""
+    import re
+    
+    # Replace "nya" with Japanese katakana "ニャ" for better pronunciation
+    # Use word boundaries to only match standalone "nya"
+    text = re.sub(r'\bnya\b', 'ニャ', text, flags=re.IGNORECASE)
+    
+    # Replace "nani" with Japanese kanji "何" for better pronunciation
+    # Use word boundaries to only match standalone "nani"
+    text = re.sub(r'\bnani\b', '何', text, flags=re.IGNORECASE)
+    
+    return text
+
 _EXCLUDE_FROM_CONFIG = _parse_exclude_processes(_cfg.get("ATTENUATION_EXCLUDE_PROCESSES", ""))
 
 def _parse_user_list(val: str):
@@ -616,6 +630,9 @@ async def anonymous_irc_reader(channel: str):
                     
                     # Filter out emotes from the message
                     filtered_message = _filter_emotes_from_message(message_text, emotes_tag)
+                    
+                    # Apply custom pronunciations
+                    filtered_message = _apply_custom_pronunciations(filtered_message)
 
                     # Skip our own messages
                     if sender.lower() == CHANNEL_NAME_LOWER:
