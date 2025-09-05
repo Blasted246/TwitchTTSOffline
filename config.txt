@@ -1,5 +1,5 @@
 # Set the Twitch channel to read (without the #)
-CHANNEL_NAME=your_channel_here
+CHANNEL_NAME=datlazycoder
 
 # Seconds between messages from the same user before their name is spoken again
 # Set to 0 to always include the username
@@ -11,7 +11,8 @@ TTS_VOLUME=1.0
 TTS_ATTENUATION=0.5
 
 # Edge-TTS voice go to https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts for options
-TTS_VOICE=en-US-AvaMultilingualNeural
+TTS_VOICE_ENGLISH=en-US-AvaMultilingualNeural
+TTS_VOICE_JAPANESE=ja-JP-NanamiNeural
 
 # Comma-separated process names to exclude from attenuation (Windows)
 ATTENUATION_EXCLUDE_PROCESSES=

@@ -35,7 +35,8 @@ def read_config(path="config.txt"):
 _cfg = read_config()
 CHANNEL_NAME = _cfg.get("CHANNEL_NAME", "your_channel_here")
 CHANNEL_NAME_LOWER = CHANNEL_NAME.lower()
-TTS_VOICE = (_cfg.get("TTS_VOICE", "en-GB-RyanNeural") or "en-GB-RyanNeural").strip()
+TTS_VOICE_ENGLISH = (_cfg.get("TTS_VOICE_ENGLISH", "en-US-AvaMultilingualNeural") or "en-US-AvaMultilingualNeural").strip()
+TTS_VOICE_JAPANESE = (_cfg.get("TTS_VOICE_JAPANESE", "ja-JP-NanamiNeural") or "ja-JP-NanamiNeural").strip()
 
 try:
     TTS_VOLUME = float(_cfg.get("TTS_VOLUME", "1.0"))
@@ -60,6 +61,49 @@ def _parse_exclude_processes(val: str):
             p = p + '.exe'
         norm.add(p)
     return norm
+
+def _get_ffplay_process_name():
+    """Get the platform-appropriate ffplay process name for exclusion from audio ducking"""
+    if sys.platform.startswith('win'):
+        return "ffplay.exe"
+    else:
+        return "ffplay"
+
+def _filter_emotes_from_message(message_text: str, emotes_tag: str) -> str:
+    """Remove Twitch emotes from message text using the emotes tag from IRC"""
+    if not emotes_tag or not message_text:
+        return message_text
+    
+    # Parse emotes tag format: "emoteid:start-end,start-end/emoteid:start-end"
+    # Example: "25:0-4,6-10/1902:12-19" means emote 25 at positions 0-4 and 6-10, emote 1902 at 12-19
+    
+    # Collect all emote positions
+    emote_positions = []
+    try:
+        for emote_data in emotes_tag.split('/'):
+            if ':' in emote_data:
+                emote_id, positions = emote_data.split(':', 1)
+                for pos_range in positions.split(','):
+                    if '-' in pos_range:
+                        start, end = pos_range.split('-')
+                        emote_positions.append((int(start), int(end) + 1))  # +1 because end is inclusive
+    except (ValueError, IndexError):
+        # If parsing fails, return original message
+        return message_text
+    
+    # Sort positions by start index in reverse order to remove from end to beginning
+    emote_positions.sort(reverse=True)
+    
+    # Remove emotes from message
+    filtered_message = message_text
+    for start, end in emote_positions:
+        if 0 <= start < len(filtered_message) and start < end <= len(filtered_message):
+            filtered_message = filtered_message[:start] + filtered_message[end:]
+    
+    # Clean up extra spaces
+    filtered_message = ' '.join(filtered_message.split())
+    
+    return filtered_message
 
 _EXCLUDE_FROM_CONFIG = _parse_exclude_processes(_cfg.get("ATTENUATION_EXCLUDE_PROCESSES", ""))
 
@@ -87,6 +131,14 @@ except ValueError:
 
 # === LOGGING ===
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+# === TEMP FOLDER SETUP ===
+def _ensure_temp_folder():
+    """Ensure the temp folder exists for TTS audio files"""
+    temp_dir = os.path.join(os.getcwd(), "tts_temp")
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+    return temp_dir
 
 # === ATTENUATION SAVING ===
 _ACTIVE_ATTENUATION = {}
@@ -124,13 +176,70 @@ def _ja_to_romaji(text: str) -> str:
     except Exception:
         return unidecode(text)
 
-def _romanize_text(text: str) -> str:
+def _detect_language_and_get_voice(text: str) -> str:
+    """Detect if text contains Japanese and return appropriate voice"""
     if _contains_japanese(text) or _contains_han(text):
-        return _ja_to_romaji(text)
-    return unidecode(text)
+        return TTS_VOICE_JAPANESE
+    return TTS_VOICE_ENGLISH
+
+def _is_japanese_word(word: str) -> bool:
+    """Check if a single word contains Japanese characters"""
+    return _contains_japanese(word) or _contains_han(word)
+
+async def _generate_word_audio(word: str, voice: str) -> str:
+    """Generate audio for a single word with specified voice"""
+    communicate = edge_tts.Communicate(word, voice=voice)
+    temp_dir = _ensure_temp_folder()
+    temp_path = os.path.join(temp_dir, f"tts_word_{int(time.time()*1000)}_{random.randint(1000,9999)}.mp3")
+    await communicate.save(temp_path)
+    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+        raise Exception(f"Failed to create audio file for word: {word}")
+    return temp_path
+
+async def _combine_audio_files(audio_files: list, output_path: str):
+    """Combine multiple audio files into one using ffmpeg"""
+    if len(audio_files) == 1:
+        # If only one file, just rename it
+        import shutil
+        shutil.move(audio_files[0], output_path)
+        return
+    
+    # Create concat file for ffmpeg
+    temp_dir = _ensure_temp_folder()
+    concat_file = os.path.join(temp_dir, f"concat_{int(time.time()*1000)}.txt")
+    try:
+        with open(concat_file, 'w', encoding='utf-8') as f:
+            for audio_file in audio_files:
+                f.write(f"file '{audio_file}'\n")
+        
+        # Use ffmpeg to concatenate
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-c", "copy", output_path, "-y",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await process.communicate()
+        
+        if process.returncode != 0:
+            raise Exception("Failed to combine audio files")
+            
+    finally:
+        # Cleanup
+        try:
+            os.remove(concat_file)
+        except Exception:
+            pass
+        for audio_file in audio_files:
+            try:
+                os.remove(audio_file)
+            except Exception:
+                pass
 
 def _restore_other_app_volumes(original: dict):
     if not (HAS_PYCAW and sys.platform.startswith("win")):
+        # On non-Windows platforms, audio ducking is not available
+        logging.debug("Audio restoration not available on this platform (Windows only)")
         return
     try:
         sessions = AudioUtilities.GetAllSessions()
@@ -148,6 +257,9 @@ def _restore_other_app_volumes(original: dict):
         pass
 async def _ramp_duck_other_app_volumes(factor: float, exclude_pids=None, exclude_names=None, duration_ms: int = FADE_MS):
     if not (HAS_PYCAW and sys.platform.startswith("win")):
+        # On non-Windows platforms, audio ducking is not available
+        # This is normal and expected behavior
+        logging.debug("Audio ducking not available on this platform (Windows only)")
         return {}
     if exclude_pids is None:
         exclude_pids = set()
@@ -197,6 +309,8 @@ async def _ramp_duck_other_app_volumes(factor: float, exclude_pids=None, exclude
 
 async def _ramp_restore_app_volumes(original: dict, duration_ms: int = FADE_MS):
     if not (HAS_PYCAW and sys.platform.startswith("win")):
+        # On non-Windows platforms, audio ducking is not available
+        logging.debug("Audio restoration not available on this platform (Windows only)")
         return
     info = []
     try:
@@ -241,14 +355,77 @@ tts_audio_queue = asyncio.Queue()
 async def generate_tts_file(text: str) -> str:
     if not text or not text.strip():
         raise ValueError("Empty text")
-    romanized = _romanize_text(text)
-    communicate = edge_tts.Communicate(romanized, voice=TTS_VOICE)
-    # Unique file per item so we can pipeline generation/playback
-    temp_path = os.path.join(os.getcwd(), f"tts_{int(time.time()*1000)}_{random.randint(1000,9999)}.mp3")
-    await communicate.save(temp_path)
-    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-        raise Exception("Failed to create audio file")
-    return temp_path
+    
+    # Split text into words, preserving spaces and punctuation
+    import re
+    words = re.findall(r'\S+|\s+', text)
+    
+    # Check if we need per-word processing (mixed languages)
+    has_japanese = any(_is_japanese_word(word.strip()) for word in words if word.strip())
+    has_non_japanese = any(not _is_japanese_word(word.strip()) and word.strip() for word in words if word.strip())
+    
+    if not (has_japanese and has_non_japanese):
+        # All same language, use single voice
+        voice = _detect_language_and_get_voice(text)
+        logging.debug(f"Using single voice '{voice}' for text: {text[:50]}...")
+        communicate = edge_tts.Communicate(text, voice=voice)
+        temp_dir = _ensure_temp_folder()
+        temp_path = os.path.join(temp_dir, f"tts_{int(time.time()*1000)}_{random.randint(1000,9999)}.mp3")
+        await communicate.save(temp_path)
+        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+            raise Exception("Failed to create audio file")
+        return temp_path
+    
+    # Mixed languages - process per word/phrase
+    logging.debug(f"Processing mixed-language text per word: {text[:50]}...")
+    audio_files = []
+    current_phrase = ""
+    current_voice = None
+    
+    # Connector words that should always use English voice
+    english_connector_words = {"says", "said", "writes", "wrote", "typed", "posted"}
+    
+    for i, word in enumerate(words):
+        if not word.strip():  # Whitespace
+            current_phrase += word
+            continue
+            
+        word_clean = word.strip().lower()
+        word_is_japanese = _is_japanese_word(word.strip())
+        
+        # Force English for connector words
+        if word_clean in english_connector_words:
+            word_is_japanese = False  # Always use English voice for these words
+        
+        needed_voice = TTS_VOICE_JAPANESE if word_is_japanese else TTS_VOICE_ENGLISH
+        
+        if current_voice is None:
+            current_voice = needed_voice
+            current_phrase += word
+        elif current_voice == needed_voice:
+            current_phrase += word
+        else:
+            # Voice change needed, process current phrase
+            if current_phrase.strip():
+                audio_file = await _generate_word_audio(current_phrase.strip(), current_voice)
+                audio_files.append(audio_file)
+            current_phrase = word
+            current_voice = needed_voice
+    
+    # Process remaining phrase
+    if current_phrase.strip():
+        audio_file = await _generate_word_audio(current_phrase.strip(), current_voice)
+        audio_files.append(audio_file)
+    
+    if not audio_files:
+        raise Exception("No audio generated")
+    
+    # Combine all audio files
+    temp_dir = _ensure_temp_folder()
+    final_path = os.path.join(temp_dir, f"tts_{int(time.time()*1000)}_{random.randint(1000,9999)}.mp3")
+    await _combine_audio_files(audio_files, final_path)
+    
+    return final_path
 
 last_sender = None
 last_time = 0
@@ -266,7 +443,17 @@ async def tts_gen_worker():
             if last_sender == display_name and (now - last_time) < NAME_REPEAT_COOLDOWN:
                 tts_text = message_text
             else:
-                tts_text = f"{display_name} says {message_text}"
+                # Check if username and message have different languages
+                username_is_japanese = _is_japanese_word(display_name)
+                message_has_japanese = _contains_japanese(message_text) or _contains_han(message_text)
+                
+                if username_is_japanese != message_has_japanese:
+                    # Different languages - create combined text that will be processed per-word
+                    tts_text = f"{display_name} says {message_text}"
+                else:
+                    # Same language - use simple concatenation
+                    tts_text = f"{display_name} says {message_text}"
+                
                 last_sender = display_name
                 last_time = now
         else:
@@ -289,7 +476,7 @@ async def tts_playback_worker():
             original_volumes = await _ramp_duck_other_app_volumes(
                 factor=TTS_ATTENUATION,
                 exclude_pids={os.getpid()},
-                exclude_names={"ffplay.exe"} | _EXCLUDE_FROM_CONFIG,
+                exclude_names={_get_ffplay_process_name()} | _EXCLUDE_FROM_CONFIG,
                 duration_ms=ATTENUATION_DELAY_MS
             )
 
@@ -417,6 +604,7 @@ async def anonymous_irc_reader(channel: str):
                         sender = "unknown"
 
                     display_name = sender
+                    emotes_tag = ""
                     if tags_part:
                         tags = {}
                         for kv in tags_part[1:].split(";"):
@@ -424,6 +612,10 @@ async def anonymous_irc_reader(channel: str):
                                 k, v = kv.split("=", 1)
                                 tags[k] = v
                         display_name = tags.get("display-name", sender)
+                        emotes_tag = tags.get("emotes", "")
+                    
+                    # Filter out emotes from the message
+                    filtered_message = _filter_emotes_from_message(message_text, emotes_tag)
 
                     # Skip our own messages
                     if sender.lower() == CHANNEL_NAME_LOWER:
@@ -431,11 +623,15 @@ async def anonymous_irc_reader(channel: str):
                     # Skip users from ignore list (sender or display name)
                     if sender.lower() in IGNORE_USERS or display_name.lower() in IGNORE_USERS:
                         continue
-                    if message_text.strip().startswith("!"):
+                    if filtered_message.strip().startswith("!"):
+                        continue
+                    
+                    # Skip if message is empty after emote filtering
+                    if not filtered_message.strip():
                         continue
 
-                    logging.info(f"Received: {display_name} says {message_text}")
-                    await tts_text_queue.put((display_name, message_text))
+                    logging.info(f"Received: {display_name} says {filtered_message}")
+                    await tts_text_queue.put((display_name, filtered_message))
                 except Exception as e:
                     logging.error(f"Error parsing line: {e} -- {line}")
     except Exception as e:
@@ -454,7 +650,31 @@ def main():
     if CHANNEL_NAME == "your_channel_here" or not CHANNEL_NAME:
         print("Please set CHANNEL_NAME in config.txt before running. Exiting.")
         return
-    logging.info(f"Starting in anonymous mode. Reading chat from channel: {CHANNEL_NAME}")
+    
+    # Platform and feature detection
+    platform_name = "Unknown"
+    if sys.platform.startswith("win"):
+        platform_name = "Windows"
+    elif sys.platform.startswith("darwin"):
+        platform_name = "macOS"
+    elif sys.platform.startswith("linux"):
+        platform_name = "Linux"
+    
+    logging.info(f"Starting Twitch TTS Bot on {platform_name}")
+    logging.info(f"Reading chat from channel: {CHANNEL_NAME}")
+    
+    # Feature availability
+    features = []
+    if HAS_PYKAKASI:
+        features.append("Japanese text romanization")
+    if HAS_PYCAW and sys.platform.startswith("win"):
+        features.append("Audio ducking (volume control)")
+    else:
+        logging.info("Audio ducking not available (Windows + pycaw required)")
+    
+    if features:
+        logging.info(f"Available features: {', '.join(features)}")
+    
     try:
         start_bot(CHANNEL_NAME)
     except KeyboardInterrupt:
