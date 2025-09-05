@@ -1,5 +1,5 @@
 # Set the Twitch channel to read (without the #)
-CHANNEL_NAME=your_channel_here
+CHANNEL_NAME=your_channel_name
 
 # Seconds between messages from the same user before their name is spoken again
 # Set to 0 to always include the username
